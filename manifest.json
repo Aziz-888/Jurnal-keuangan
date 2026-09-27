@@ -1,0 +1,15 @@
+{
+  "name": "Jurnal Keuangan",
+  "short_name": "Jurnal",
+  "description": "Jurnal keuangan pribadi — transaksi, rekening, tabungan & investasi",
+  "start_url": "./jurnal-keuangan.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eaf0ee",
+  "theme_color": "#12302e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
