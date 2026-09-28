@@ -1,4 +1,6 @@
-const CACHE = 'jurnal-keuangan-v1';
+// v2 — perbaikan: permintaan ke server data (Google Apps Script) TIDAK PERNAH di-cache.
+// Versi lama menyimpan jawaban server di cache sehingga aplikasi bisa menerima data lama.
+const CACHE = 'jurnal-keuangan-v2';
 const SHELL = ['./jurnal-keuangan.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -13,23 +15,22 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// App shell (HTML/CSS/JS/icon) is cached so the app still OPENS without internet.
-// Data sync itself still needs internet (it talks to your Google Apps Script server) —
-// this only makes sure the app's interface loads instantly, every time.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  // Hanya file aplikasi milik sendiri yang boleh ditangani. Semua permintaan ke luar
+  // (terutama server Apps Script) langsung ke jaringan, tanpa cache.
+  if (url.origin !== self.location.origin) return;
+  // Jaringan lebih dulu (selalu ambil versi terbaru); cache hanya cadangan saat tidak ada sinyal.
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const fetchPromise = fetch(e.request)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(e.request, { cache: 'no-cache' })
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });

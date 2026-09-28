@@ -295,6 +295,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · versi 3 (sinkronisasi aman)</p>
 </div>
 <div id="toast" role="status"></div>
 
@@ -309,20 +310,60 @@ const COL=['#0f7a6b','#e3a72f','#c2483d','#3b6fb6','#8a5cc2','#e07b39','#4aa3a0'
 
 let ACC=['Tunai','Bank'],ACCKIND={Tunai:'cash',Bank:'noncash'};
 let CAT={in:['Gaji','Bonus','Usaha online','Lainnya'],out:['Makanan','Transportasi','Tagihan','Belanja','Keluarga','Investasi','Hiburan','Lainnya']};
-let tx=[],GOALS=[],ym=today().slice(0,7),type='out',editId=null,catPageType='out';
+let tx=[],GOALS=[],deletedTx={},deletedGoals={},metaAt=0,lastMetaSig='',ym=today().slice(0,7),type='out',editId=null,catPageType='out';
 let apiUrl=null,apiKey=null,synced=false,writing=false,queued=false,pollTimer=null;
 try{apiUrl=localStorage.getItem('jk_api_url')||null;apiKey=localStorage.getItem('jk_api_key')||null}catch(e){}
 
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),2400)}
 const sum=(a,t)=>a.filter(x=>x.type===t).reduce((s,x)=>s+x.amt,0);
-function opts(sel,list,selected){sel.innerHTML=list.map(c=>`<option${c===selected?' selected':''}>${esc(c)}</option>`).join('')}
+function opts(sel,list,selected){const cur=selected!==undefined?selected:sel.value;sel.innerHTML=list.map(c=>`<option${c===cur?' selected':''}>${esc(c)}</option>`).join('')}
 const kindOf=name=>ACCKIND[name]||(/tunai|cash/i.test(name)?'cash':'noncash');
 
 /* ---------- data & sync (Google Apps Script backend) ---------- */
-function buildState(){return{acc:ACC,acckind:ACCKIND,cat:CAT,tx,goals:GOALS}}
+// Prinsip keamanan data:
+//  1) Data lokal TIDAK PERNAH ditimpa mentah-mentah oleh data server; selalu digabung (merge).
+//  2) Penghapusan dicatat (tombstone) supaya data yang dihapus tidak hidup lagi.
+//  3) Jika gagal membaca server, aplikasi TIDAK menulis apa pun ke server.
+function stable(v){if(Array.isArray(v))return v.map(stable);if(v&&typeof v==='object'){const o={};Object.keys(v).sort().forEach(k=>{o[k]=stable(v[k])});return o}return v}
+const sig=s=>JSON.stringify(stable(s));
+const metaSig=()=>JSON.stringify(stable([ACC,ACCKIND,CAT]));
+const cl=x=>JSON.parse(JSON.stringify(x));
+function normDel(d){if(Array.isArray(d)){const o={};d.forEach(i=>{o[i]=1});return o}return(d&&typeof d==='object')?d:{}}
+function buildState(){return{acc:ACC,acckind:ACCKIND,cat:CAT,tx,goals:GOALS,deletedTx,deletedGoals,metaAt}}
 function applyState(d){
   ACC=d.acc||ACC;ACCKIND=d.acckind||ACCKIND;CAT=d.cat||CAT;tx=d.tx||tx;GOALS=d.goals||GOALS;
+  deletedTx=normDel(d.deletedTx);deletedGoals=normDel(d.deletedGoals);metaAt=d.metaAt||0;
   tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
+  lastMetaSig=metaSig();
+}
+const unionList=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
+function mergeDel(a,b){const o={...normDel(a)},nb=normDel(b);Object.keys(nb).forEach(k=>{o[k]=Math.max(o[k]||0,nb[k])});return o}
+function ensureRefs(x){
+  const addAcc=n=>{if(n&&!x.acc.includes(n))x.acc.push(n)};
+  const addCat=(t,c)=>{if(!c)return;const l=x.cat[t]=x.cat[t]||[];if(!l.includes(c)){if(l.length&&l[l.length-1]===KEEP)l.splice(l.length-1,0,c);else l.push(c)}};
+  x.tx.forEach(t=>{if(t.type==='transfer'){addAcc(t.from);addAcc(t.to)}else{addAcc(t.acc);addCat(t.type,t.cat)}});
+  x.goals.forEach(g=>addAcc(g.acc));
+}
+function mergeState(local,remote){
+  if(!remote)return local;
+  const dTx=mergeDel(local.deletedTx,remote.deletedTx),dG=mergeDel(local.deletedGoals,remote.deletedGoals);
+  const pick=(l,r,del)=>{
+    const m=new Map();(r||[]).forEach(x=>m.set(String(x.id),x));
+    (l||[]).forEach(x=>{const k=String(x.id),ex=m.get(k);if(!ex||(x.updatedAt||0)>=(ex.updatedAt||0))m.set(k,x)});
+    return[...m.values()].filter(x=>{const t=del[x.id];return t===undefined||(x.updatedAt||0)>t}).sort((a,b)=>a.id-b.id);
+  };
+  const la=local.metaAt||0,ra=remote.metaAt||0;
+  let acc,acckind,cat;
+  if(la>ra){acc=cl(local.acc||[]);acckind=cl(local.acckind||{});cat=cl(local.cat||{})}
+  else if(ra>la){acc=cl(remote.acc||[]);acckind=cl(remote.acckind||{});cat=cl(remote.cat||{})}
+  else{
+    acc=unionList(remote.acc,local.acc);acckind={...(remote.acckind||{}),...(local.acckind||{})};
+    cat={in:unionList(remote.cat&&remote.cat.in,local.cat&&local.cat.in),out:unionList(remote.cat&&remote.cat.out,local.cat&&local.cat.out)};
+  }
+  cat.in=cat.in||[];cat.out=cat.out||[];
+  const out={acc,acckind,cat,tx:pick(local.tx,remote.tx,dTx),goals:pick(local.goals,remote.goals,dG),deletedTx:dTx,deletedGoals:dG,metaAt:Math.max(la,ra)};
+  ensureRefs(out);
+  return out;
 }
 function loadLocal(){
   try{const raw=localStorage.getItem('jk_cache');if(raw){applyState(JSON.parse(raw));return}}catch(e){}
@@ -332,21 +373,47 @@ function loadLocal(){
   try{tx=JSON.parse(localStorage.getItem('jk_tx')||'[]')}catch(e){}
   try{GOALS=JSON.parse(localStorage.getItem('jk_goals'))||GOALS}catch(e){}
   tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
+  lastMetaSig=metaSig();
 }
 function saveLocalCache(){try{localStorage.setItem('jk_cache',JSON.stringify(buildState()))}catch(e){}}
-async function flushServer(){
-  if(!apiUrl)return;
-  if(writing){queued=true;return}
-  writing=true;const data=buildState();
-  try{
-    const res=await fetch(apiUrl+'?api=1&key='+encodeURIComponent(apiKey||''),{method:'POST',body:JSON.stringify(data)});
-    const j=await res.json();
-    if(j.error){setSync('offline');toast('Server menolak: '+j.error)}
-  }catch(e){toast('Gagal menyimpan ke server, coba lagi nanti');setSync('offline');scheduleRetry()}
-  writing=false;
-  if(queued){queued=false;flushServer()}
+const apiQ=()=>apiUrl+'?api=1&key='+encodeURIComponent(apiKey||'')+'&_='+Date.now();
+async function fetchServer(){
+  const res=await fetch(apiQ(),{cache:'no-store'});
+  const j=await res.json();
+  if(j.error)throw new Error(j.error);
+  if(!j.data||j.data==='{}')return null;
+  return JSON.parse(j.data);
 }
-function persist(){saveLocalCache();if(apiUrl)flushServer()}
+async function postServer(state){
+  const res=await fetch(apiQ(),{method:'POST',body:JSON.stringify(state),cache:'no-store'});
+  const j=await res.json();
+  if(j.error)throw new Error(j.error);
+}
+let syncRetries=0;
+async function syncNow(bg){
+  if(!apiUrl)return;
+  if(writing){if(!bg)queued=true;return}
+  writing=true;
+  try{
+    const remote=await fetchServer();            // gagal membaca => lompat ke catch, TIDAK menulis apa pun
+    const local=buildState();
+    const merged=mergeState(local,remote);
+    if(sig(merged)!==sig(local)){applyState(merged);saveLocalCache();render()}
+    if(!remote||sig(merged)!==sig(remote))await postServer(merged);
+    synced=true;syncRetries=0;setSync('online');
+  }catch(e){
+    setSync('offline');
+    if(!bg)toast('Belum tersambung ke server. Data aman di perangkat ini dan akan dikirim otomatis.');
+    scheduleRetry();
+  }
+  writing=false;
+  if(queued){queued=false;syncNow()}
+}
+function persist(){
+  const ms=metaSig();if(ms!==lastMetaSig){metaAt=Date.now();lastMetaSig=ms}
+  saveLocalCache();
+  if(apiUrl)syncNow();
+}
 
 function setSync(state){
   const map={online:['Tersinkron','on'],unset:['Belum diatur — ketuk ⚙️',''],offline:['Terputus — ketuk untuk coba lagi','off'],connecting:['Menyambungkan…','']};
@@ -356,7 +423,6 @@ function setSync(state){
   b.style.cursor=(state==='unset'||state==='offline')?'pointer':'default';
   $('#localNote').hidden=state!=='unset';
 }
-let syncRetries=0;
 async function initSync(manual){
   if(manual)syncRetries=0;
   loadLocal();render();
@@ -366,16 +432,8 @@ async function initSync(manual){
   }
   if(!apiUrl){setSync('unset');return}
   setSync('connecting');
-  try{
-    const res=await fetch(apiUrl+'?api=1&key='+encodeURIComponent(apiKey||''));
-    const j=await res.json();
-    if(j.error){setSync('offline');toast('Server menolak: '+j.error);scheduleRetry();return}
-    syncRetries=0;
-    if(j.data&&j.data!=='{}'){applyState(JSON.parse(j.data));synced=true}
-    else{synced=true;await flushServer()}
-    setSync('online');render();
-    startPolling();
-  }catch(e){setSync('offline');scheduleRetry()}
+  await syncNow();
+  startPolling();
 }
 function scheduleRetry(){
   if(syncRetries>=3)return;
@@ -384,16 +442,10 @@ function scheduleRetry(){
 }
 function startPolling(){
   if(pollTimer)clearInterval(pollTimer);
-  pollTimer=setInterval(async()=>{
-    if(!apiUrl||writing)return;
-    try{
-      const res=await fetch(apiUrl+'?api=1&key='+encodeURIComponent(apiKey||''));
-      const j=await res.json();
-      if(!j.error&&j.data&&j.data!=='{}'){applyState(JSON.parse(j.data));saveLocalCache();render();setSync('online')}
-    }catch(e){/* diamkan, biarkan retry berikutnya */}
-  },20000);
+  pollTimer=setInterval(()=>{if(!document.hidden)syncNow(true)},30000);
 }
-$('#syncBadge').onclick=()=>{if(!synced)initSync(true);else if(!apiUrl)openSetup()};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&apiUrl&&synced)syncNow(true)});
+$('#syncBadge').onclick=()=>{if(!apiUrl){openSetup();return}if(!synced)initSync(true);else syncNow()};
 function openSetup(){$('#setUrl').value=apiUrl||(location.origin.includes('script.google.com')?location.href.split('?')[0]:'');$('#setKey').value=apiKey||'';$('#setupDlg').showModal()}
 $('#gearBtn').onclick=openSetup;
 $('#setClose').onclick=()=>$('#setupDlg').close();
@@ -405,7 +457,7 @@ $('#setSave').onclick=()=>{
   $('#setupDlg').close();syncRetries=0;initSync(true);
 };
 $('#copyGas').onclick=async()=>{
-  const code=`const SHEET_NAME='JurnalData', CELL='A1';\nfunction getSheet_(){const ss=SpreadsheetApp.getActiveSpreadsheet();let sh=ss.getSheetByName(SHEET_NAME);if(!sh){sh=ss.insertSheet(SHEET_NAME);sh.getRange(CELL).setValue('{}');}return sh;}\nfunction checkKey_(e){const req=PropertiesService.getScriptProperties().getProperty('SECRET_KEY');const given=(e.parameter&&e.parameter.key)||'';return !req||req===given;}\nfunction doGet(e){if(!checkKey_(e))return jsonOut_({error:'unauthorized'});const sh=getSheet_();return jsonOut_({data:sh.getRange(CELL).getValue()||'{}'});}\nfunction doPost(e){if(!checkKey_(e))return jsonOut_({error:'unauthorized'});const sh=getSheet_();const body=e.postData.contents;try{JSON.parse(body)}catch(err){return jsonOut_({error:'invalid json'})}sh.getRange(CELL).setValue(body);return jsonOut_({status:'ok'});}\nfunction jsonOut_(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);}`;
+  const code="const SHEET_NAME = 'JurnalData';\nconst BACKUP_SHEET = 'Cadangan';\nconst CHUNK = 40000;       // di bawah batas 50.000 karakter per sel\nconst KEEP_BACKUPS = 14;   // jumlah cadangan harian yang disimpan\n\nfunction getSheet_() {\n  const ss = SpreadsheetApp.getActiveSpreadsheet();\n  let sh = ss.getSheetByName(SHEET_NAME);\n  if (!sh) {\n    sh = ss.insertSheet(SHEET_NAME);\n    sh.getRange('A1').setNumberFormat('@').setValue('{}');\n  }\n  return sh;\n}\n\nfunction checkKey_(e) {\n  const req = PropertiesService.getScriptProperties().getProperty('SECRET_KEY');\n  const given = (e.parameter && e.parameter.key) || '';\n  return !req || req === given;\n}\n\nfunction readAll_(sh) {\n  const last = sh.getLastRow();\n  if (last < 1) return '{}';\n  const vals = sh.getRange(1, 1, last, 1).getValues();\n  return vals.map(function (r) { return String(r[0]); }).join('') || '{}';\n}\n\nfunction writeAll_(sh, text) {\n  const parts = [];\n  for (let i = 0; i < text.length; i += CHUNK) parts.push([text.substring(i, i + CHUNK)]);\n  if (!parts.length) parts.push(['{}']);\n  const oldLast = sh.getLastRow();\n  // format teks ('@') supaya potongan yang diawali \"=\" tidak dianggap rumus\n  sh.getRange(1, 1, parts.length, 1).setNumberFormat('@').setValues(parts);\n  if (oldLast > parts.length) sh.getRange(parts.length + 1, 1, oldLast - parts.length, 1).clearContent();\n}\n\nfunction snapshot_(prev) {\n  try {\n    if (!prev || prev === '{}') return;\n    const ss = SpreadsheetApp.getActiveSpreadsheet();\n    let bk = ss.getSheetByName(BACKUP_SHEET);\n    if (!bk) {\n      bk = ss.insertSheet(BACKUP_SHEET);\n      bk.getRange(1, 1, 1, 2).setValues([['Waktu (data sebelum perubahan pertama hari itu)', 'Data JSON (dipecah per sel)']]);\n    }\n    const tz = Session.getScriptTimeZone();\n    const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');\n    const last = bk.getLastRow();\n    if (last >= 2 && String(bk.getRange(last, 1).getValue()).indexOf(today) === 0) return; // sudah ada hari ini\n    const row = [Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')];\n    for (let i = 0; i < prev.length; i += CHUNK) row.push(prev.substring(i, i + CHUNK));\n    bk.getRange(last + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);\n    const total = bk.getLastRow();\n    if (total > KEEP_BACKUPS + 1) bk.deleteRows(2, total - (KEEP_BACKUPS + 1));\n  } catch (err) { /* cadangan gagal tidak boleh menggagalkan penyimpanan utama */ }\n}\n\nfunction doGet(e) {\n  if (!checkKey_(e)) return jsonOut_({ error: 'unauthorized' });\n  const lock = LockService.getScriptLock();\n  if (!lock.tryLock(15000)) return jsonOut_({ error: 'server sibuk, coba lagi' });\n  try {\n    return jsonOut_({ data: readAll_(getSheet_()) });\n  } catch (err) {\n    return jsonOut_({ error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n\nfunction doPost(e) {\n  if (!checkKey_(e)) return jsonOut_({ error: 'unauthorized' });\n  const body = (e.postData && e.postData.contents) || '';\n  try { JSON.parse(body); } catch (err) { return jsonOut_({ error: 'invalid json' }); }\n  const lock = LockService.getScriptLock();\n  if (!lock.tryLock(15000)) return jsonOut_({ error: 'server sibuk, coba lagi' });\n  try {\n    const sh = getSheet_();\n    snapshot_(readAll_(sh));\n    writeAll_(sh, body);\n    return jsonOut_({ status: 'ok' });\n  } catch (err) {\n    return jsonOut_({ error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n\nfunction jsonOut_(obj) {\n  return ContentService.createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
   try{await navigator.clipboard.writeText(code);toast('Kode server disalin — tempel di Apps Script')}
   catch(e){toast('Gagal menyalin otomatis — salin manual dari sumber halaman jika perlu')}
 };
@@ -563,8 +615,8 @@ function demo(){
   const [y,m]=ym.split('-').map(Number),mk=(mo,d)=>monthKey(y,mo-1)+'-'+String(d).padStart(2,'0');
   const rows=[['in','Gaji',6500000,'Gaji bulanan',1],['in','Usaha online',450000,'Komisi afiliasi',12],['out','Makanan',780000,'Belanja dapur',3],['out','Tagihan',520000,'Listrik & internet',5],['out','Transportasi',260000,'Bensin',8],['out','Keluarga',350000,'Kebutuhan anak',10],['out','Investasi',100000,'Setoran rutin',14],['out','Hiburan',120000,'Nonton',18]];
   let id=Date.now();
-  [0,1,2].forEach(k=>rows.forEach(r=>tx.push({id:id++,type:r[0],cat:r[1],acc:ACC[0],amt:Math.round(r[2]*(1+((id%5)-2)*.03)/1000)*1000,note:r[3],date:mk(m-k,r[4])})));
-  if(ACC[1])tx.push({id:id++,type:'transfer',from:ACC[0],to:ACC[1],amt:500000,note:'Tabungan bulanan',date:mk(m,15)});
+  [0,1,2].forEach(k=>rows.forEach(r=>tx.push({id:id++,type:r[0],cat:r[1],acc:ACC[0],amt:Math.round(r[2]*(1+((id%5)-2)*.03)/1000)*1000,note:r[3],date:mk(m-k,r[4]),updatedAt:Date.now()})));
+  if(ACC[1])tx.push({id:id++,type:'transfer',from:ACC[0],to:ACC[1],amt:500000,note:'Tabungan bulanan',date:mk(m,15),updatedAt:Date.now()});
   persist();render();toast('Data contoh ditambahkan')}
 
 /* ---------- events: month nav & theme ---------- */
@@ -588,19 +640,19 @@ $('#f').onsubmit=e=>{e.preventDefault();
     const from=$('#ffrom').value,to=$('#fto').value;
     if(!from||!to||from===to){toast('Pilih dua rekening yang berbeda');return}
     fee=editId?0:Number($('#ffee').value.replace(/\D/g,''))||0;
-    t={id:editId||Date.now(),type:'transfer',date:$('#fd').value,from,to,amt,note:$('#fn').value.trim()};
+    t={id:editId||Date.now(),type:'transfer',date:$('#fd').value,from,to,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
   }else{
-    t={id:editId||Date.now(),type,date:$('#fd').value,cat:$('#fc').value,acc:$('#facc').value,amt,note:$('#fn').value.trim()};
+    t={id:editId||Date.now(),type,date:$('#fd').value,cat:$('#fc').value,acc:$('#facc').value,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
   }
   if(editId)tx=tx.map(x=>x.id===editId?t:x);else tx.push(t);
   if(fee>0){
     if(!CAT.out.includes('Biaya admin'))CAT.out.splice(CAT.out.length-1,0,'Biaya admin');
-    tx.push({id:t.id+1,type:'out',date:t.date,cat:'Biaya admin',acc:t.from,amt:fee,note:'Biaya transfer ke '+t.to});
+    tx.push({id:t.id+1,type:'out',date:t.date,cat:'Biaya admin',acc:t.from,amt:fee,note:'Biaya transfer ke '+t.to,updatedAt:Date.now()});
   }
   persist();ym=t.date.slice(0,7);toast(editId?'Perubahan disimpan':(fee>0?'Transaksi & biaya transfer disimpan':'Transaksi disimpan'));resetForm();render()};
 $('#tb').onclick=e=>{
   const b=e.target.closest('button');if(!b)return;
-  if(b.dataset.d){if(confirm('Hapus transaksi ini?')){tx=tx.filter(x=>x.id!=b.dataset.d);persist();render();toast('Transaksi dihapus')}}
+  if(b.dataset.d){if(confirm('Hapus transaksi ini?')){const rec=tx.find(x=>x.id==b.dataset.d);if(rec)deletedTx[rec.id]=Date.now();tx=tx.filter(x=>x.id!=b.dataset.d);persist();render();toast('Transaksi dihapus')}}
   if(b.dataset.e){const t=tx.find(x=>x.id==b.dataset.e);if(!t)return;
     editId=t.id;setType(t.type);$('#fd').value=t.date;$('#fa').value=fmtAmt(String(t.amt));$('#fn').value=t.note||'';
     if(t.type==='transfer'){opts($('#ffrom'),ACC,t.from);opts($('#fto'),ACC.filter(a=>a!==t.from),t.to)}
@@ -629,16 +681,16 @@ $('#addGoal').onclick=()=>{
   const name=$('#gName').value.trim();if(!name){toast('Isi nama target dulu');return}
   const acc=$('#gAcc').value;if(!acc){toast('Tambahkan rekening dulu di halaman Rekening');return}
   const target=Number($('#gTgt').value.replace(/\D/g,''))||0;
-  GOALS.push({id:Date.now(),name,acc,target});
+  GOALS.push({id:Date.now(),name,acc,target,updatedAt:Date.now()});
   $('#gName').value='';$('#gTgt').value='';
   persist();render();toast('Target ditambahkan')};
 $('#goalsList').addEventListener('input',e=>{if(e.target.classList.contains('tgt'))e.target.value=fmtAmt(e.target.value)});
 $('#goalsList').addEventListener('click',e=>{
   const sv=e.target.closest('button[data-savetgt]'),del=e.target.closest('button[data-delgoal]');
   if(sv){const id=Number(sv.dataset.savetgt),inp=document.querySelector(`.tgt[data-gid="${id}"]`),val=Number(inp.value.replace(/\D/g,''))||0;
-    GOALS=GOALS.map(g=>g.id===id?{...g,target:val}:g);persist();render();toast('Target diperbarui')}
+    GOALS=GOALS.map(g=>g.id===id?{...g,target:val,updatedAt:Date.now()}:g);persist();render();toast('Target diperbarui')}
   if(del){const id=Number(del.dataset.delgoal);
-    if(confirm('Hapus target ini? Saldo rekening tidak ikut terhapus.')){GOALS=GOALS.filter(g=>g.id!==id);persist();render();toast('Target dihapus')}}});
+    if(confirm('Hapus target ini? Saldo rekening tidak ikut terhapus.')){deletedGoals[id]=Date.now();GOALS=GOALS.filter(g=>g.id!==id);persist();render();toast('Target dihapus')}}});
 
 /* ---------- events: categories page ---------- */
 $('#cOut').onclick=()=>{catPageType='out';renderCatPage()};
@@ -690,14 +742,14 @@ $('#fileCsv').onchange=e=>{
         if(m.length!==2){skipped++;return}
         const [from,to]=m.map(s=>s.trim());
         [from,to].forEach(a=>{if(!ACC.includes(a)){ACC.push(a);ACCKIND[a]='noncash'}});
-        tx.push({id:id++,type:'transfer',date,from,to,amt,note:catatan||''});added++;
+        tx.push({id:id++,type:'transfer',date,from,to,amt,note:catatan||'',updatedAt:Date.now()});added++;
       }else if(jenis==='Pemasukan'||jenis==='Pengeluaran'){
         const t=jenis==='Pemasukan'?'in':'out';
         const m=kategori.match(/^(.*)\s\((.+)\)$/);
         const cat=m?m[1]:kategori,acc=m?m[2]:ACC[0];
         if(!ACC.includes(acc)){ACC.push(acc);ACCKIND[acc]='noncash'}
         if(!CAT[t].includes(cat))CAT[t].splice(CAT[t].length-1,0,cat);
-        tx.push({id:id++,type:t,date,cat,acc,amt,note:catatan||''});added++;
+        tx.push({id:id++,type:t,date,cat,acc,amt,note:catatan||'',updatedAt:Date.now()});added++;
       }else skipped++;
     });
     if(!added){toast('Tidak ada baris yang bisa diimpor dari file ini');return}
@@ -711,12 +763,16 @@ $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileR
     const list=Array.isArray(d)?d:d.tx;
     if(!Array.isArray(list))throw 0;
     if(confirm('Ganti semua data saat ini dengan cadangan ini ('+list.length+' transaksi)?')){
-      tx=list;if(!Array.isArray(d)){if(d.acc)ACC=d.acc;if(d.acckind)ACCKIND=d.acckind;if(d.cat)CAT=d.cat;if(d.goals)GOALS=d.goals}
+      const now=Date.now(),keepIds=new Set(list.map(x=>String(x.id)));
+      tx.forEach(x=>{if(!keepIds.has(String(x.id)))deletedTx[x.id]=now});
+      tx=list.map((x,i)=>({...x,id:x.id||now+i,updatedAt:now}));
+      if(!Array.isArray(d)){if(d.acc)ACC=d.acc;if(d.acckind)ACCKIND=d.acckind;if(d.cat)CAT=d.cat;
+        if(Array.isArray(d.goals)){const gIds=new Set(d.goals.map(g=>String(g.id)));GOALS.forEach(g=>{if(!gIds.has(String(g.id)))deletedGoals[g.id]=now});GOALS=d.goals.map(g=>({...g,updatedAt:now}))}}
       tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
       persist();resetForm();render();toast('Data dipulihkan')}
   }catch(_){toast('File cadangan tidak valid')}};
   r.readAsText(f);e.target.value=''};
-$('#del').onclick=()=>{if(tx.length&&confirm('Hapus SEMUA transaksi? Pastikan sudah dicadangkan.')){tx=[];persist();render();toast('Semua data dihapus')}};
+$('#del').onclick=()=>{if(tx.length&&confirm('Hapus SEMUA transaksi? Pastikan sudah dicadangkan.')){const now=Date.now();tx.forEach(x=>{deletedTx[x.id]=now});tx=[];persist();render();toast('Semua data dihapus')}};
 
 /* ---------- boot ---------- */
 applyTheme();
