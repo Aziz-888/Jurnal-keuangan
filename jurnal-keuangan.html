@@ -32,6 +32,7 @@ button,select,input{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--in);outline-offset:2px}
 .btn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;cursor:pointer}
 .btn:hover{border-color:var(--mut)}
+.btn:disabled{opacity:.35;cursor:default;pointer-events:none}
 .btn.pri{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
 .btn.sm{padding:3px 8px;font-size:13px}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
@@ -295,7 +296,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
-<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · versi 3 (sinkronisasi aman)</p>
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · versi 4 (rotasi HP, ganti nama & geser urutan rekening/transaksi)</p>
 </div>
 <div id="toast" role="status"></div>
 
@@ -333,7 +334,7 @@ function buildState(){return{acc:ACC,acckind:ACCKIND,cat:CAT,tx,goals:GOALS,dele
 function applyState(d){
   ACC=d.acc||ACC;ACCKIND=d.acckind||ACCKIND;CAT=d.cat||CAT;tx=d.tx||tx;GOALS=d.goals||GOALS;
   deletedTx=normDel(d.deletedTx);deletedGoals=normDel(d.deletedGoals);metaAt=d.metaAt||0;
-  tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
+  tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0];if(t.seq===undefined)t.seq=t.id});
   lastMetaSig=metaSig();
 }
 const unionList=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
@@ -372,7 +373,7 @@ function loadLocal(){
   try{CAT=JSON.parse(localStorage.getItem('jk_cat'))||CAT}catch(e){}
   try{tx=JSON.parse(localStorage.getItem('jk_tx')||'[]')}catch(e){}
   try{GOALS=JSON.parse(localStorage.getItem('jk_goals'))||GOALS}catch(e){}
-  tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
+  tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0];if(t.seq===undefined)t.seq=t.id});
   lastMetaSig=metaSig();
 }
 function saveLocalCache(){try{localStorage.setItem('jk_cache',JSON.stringify(buildState()))}catch(e){}}
@@ -510,7 +511,11 @@ function renderAcc(){
   const summary=`<span>Tunai: <b>${rp(cash)}</b></span><span>Non-tunai: <b>${rp(non)}</b></span>`;
   $('#accSummary').innerHTML=summary;$('#accSummary2').innerHTML=summary;
   $('#accList').innerHTML=ACC.map(a=>{const b=accBalance(a);return `<div class="chip"><span>${esc(a)}</span><b class="${b<0?'neg':''}">${rp(b)}</b></div>`}).join('');
-  $('#accMgrList').innerHTML=ACC.map(a=>`<div class="catrow"><span>${esc(a)} <span class="sub">(${kindOf(a)==='cash'?'Tunai':'Non-tunai'})</span></span><span><button class="btn sm" data-kind="${esc(a)}">Ubah jenis</button>${ACC.length>1?`<button class="btn sm" data-delacc="${esc(a)}">Hapus</button>`:''}</span></div>`).join('');
+  $('#accMgrList').innerHTML=ACC.map((a,i)=>`<div class="catrow"><span>${esc(a)} <span class="sub">(${kindOf(a)==='cash'?'Tunai':'Non-tunai'})</span></span><span>
+    <button class="btn sm" data-up="${esc(a)}" ${i===0?'disabled':''} aria-label="Naikkan urutan ${esc(a)}">▲</button>
+    <button class="btn sm" data-down="${esc(a)}" ${i===ACC.length-1?'disabled':''} aria-label="Turunkan urutan ${esc(a)}">▼</button>
+    <button class="btn sm" data-rename="${esc(a)}">Ganti nama</button>
+    <button class="btn sm" data-kind="${esc(a)}">Ubah jenis</button>${ACC.length>1?`<button class="btn sm" data-delacc="${esc(a)}">Hapus</button>`:''}</span></div>`).join('');
   opts($('#facc'),ACC);opts($('#ffrom'),ACC);opts($('#fto'),ACC.length>1?ACC.filter(a=>a!==$('#ffrom').value):ACC);
   const fAcc=$('#fAcc'),cur=fAcc.value;
   fAcc.innerHTML='<option value="">Semua rekening</option>'+ACC.map(a=>`<option${a===cur?' selected':''}>${esc(a)}</option>`).join('');
@@ -581,6 +586,7 @@ function rowLabelAmt(t,fAcc){
   }
   return{lbl:`<span class="tag">${esc(t.cat)}</span> <span class="sub">${esc(t.acc)}</span>`,cls:t.type==='in'?'pos':'neg',sign:t.type==='in'?'+':'-'};
 }
+let visibleOrder=[];
 function table(mt){
   const q=$('#q').value.trim().toLowerCase(),ft=$('#ft').value,fAcc=$('#fAcc').value;
   let r=mt.filter(t=>{
@@ -588,12 +594,16 @@ function table(mt){
     if(fAcc){if(t.type==='transfer'){if(t.from!==fAcc&&t.to!==fAcc)return false}else if(t.acc!==fAcc)return false}
     if(q){const hay=(t.type==='transfer'?t.from+' '+t.to:t.cat+' '+t.acc)+' '+(t.note||'');if(!hay.toLowerCase().includes(q))return false}
     return true;
-  }).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+  }).sort((a,b)=>(b.seq??b.id)-(a.seq??a.id)||b.id-a.id);
+  visibleOrder=r.map(t=>t.id);
   if(!r.length){
     $('#tb').innerHTML=`<tr><td colspan="5" class="empty">${tx.length?'Tidak ada transaksi yang cocok di bulan ini.':'Belum ada transaksi. Isi formulir di samping, atau <button class="btn sm" id="demo">coba dengan data contoh</button>'}</td></tr>`;
     const d=$('#demo');if(d)d.onclick=demo;return}
-  $('#tb').innerHTML=r.map(t=>{const x=rowLabelAmt(t,fAcc);
-    return `<tr><td>${t.date.slice(8)}/${t.date.slice(5,7)}</td><td>${x.lbl}</td><td>${esc(t.note||'')}</td><td class="n ${x.cls}">${x.sign}${rp(t.amt).replace('-','')}</td><td class="a"><button class="btn sm" data-e="${t.id}">Ubah</button> <button class="btn sm" data-d="${t.id}" aria-label="Hapus transaksi">Hapus</button></td></tr>`;
+  $('#tb').innerHTML=r.map((t,i)=>{const x=rowLabelAmt(t,fAcc);
+    return `<tr><td>${t.date.slice(8)}/${t.date.slice(5,7)}</td><td>${x.lbl}</td><td>${esc(t.note||'')}</td><td class="n ${x.cls}">${x.sign}${rp(t.amt).replace('-','')}</td><td class="a">
+      <button class="btn sm" data-up2="${t.id}" ${i===0?'disabled':''} aria-label="Geser naik" title="Geser naik">▲</button>
+      <button class="btn sm" data-down2="${t.id}" ${i===r.length-1?'disabled':''} aria-label="Geser turun" title="Geser turun">▼</button>
+      <button class="btn sm" data-e="${t.id}">Ubah</button> <button class="btn sm" data-d="${t.id}" aria-label="Hapus transaksi">Hapus</button></td></tr>`;
   }).join('');
 }
 function render(){
@@ -615,8 +625,8 @@ function demo(){
   const [y,m]=ym.split('-').map(Number),mk=(mo,d)=>monthKey(y,mo-1)+'-'+String(d).padStart(2,'0');
   const rows=[['in','Gaji',6500000,'Gaji bulanan',1],['in','Usaha online',450000,'Komisi afiliasi',12],['out','Makanan',780000,'Belanja dapur',3],['out','Tagihan',520000,'Listrik & internet',5],['out','Transportasi',260000,'Bensin',8],['out','Keluarga',350000,'Kebutuhan anak',10],['out','Investasi',100000,'Setoran rutin',14],['out','Hiburan',120000,'Nonton',18]];
   let id=Date.now();
-  [0,1,2].forEach(k=>rows.forEach(r=>tx.push({id:id++,type:r[0],cat:r[1],acc:ACC[0],amt:Math.round(r[2]*(1+((id%5)-2)*.03)/1000)*1000,note:r[3],date:mk(m-k,r[4]),updatedAt:Date.now()})));
-  if(ACC[1])tx.push({id:id++,type:'transfer',from:ACC[0],to:ACC[1],amt:500000,note:'Tabungan bulanan',date:mk(m,15),updatedAt:Date.now()});
+  [0,1,2].forEach(k=>rows.forEach(r=>tx.push({id:id++,seq:id,type:r[0],cat:r[1],acc:ACC[0],amt:Math.round(r[2]*(1+((id%5)-2)*.03)/1000)*1000,note:r[3],date:mk(m-k,r[4]),updatedAt:Date.now()})));
+  if(ACC[1])tx.push({id:id++,seq:id,type:'transfer',from:ACC[0],to:ACC[1],amt:500000,note:'Tabungan bulanan',date:mk(m,15),updatedAt:Date.now()});
   persist();render();toast('Data contoh ditambahkan')}
 
 /* ---------- events: month nav & theme ---------- */
@@ -640,18 +650,28 @@ $('#f').onsubmit=e=>{e.preventDefault();
     const from=$('#ffrom').value,to=$('#fto').value;
     if(!from||!to||from===to){toast('Pilih dua rekening yang berbeda');return}
     fee=editId?0:Number($('#ffee').value.replace(/\D/g,''))||0;
-    t={id:editId||Date.now(),type:'transfer',date:$('#fd').value,from,to,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
+    t={id:editId||Date.now(),seq:editId?(tx.find(x=>x.id===editId)||{}).seq:Date.now(),type:'transfer',date:$('#fd').value,from,to,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
   }else{
-    t={id:editId||Date.now(),type,date:$('#fd').value,cat:$('#fc').value,acc:$('#facc').value,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
+    t={id:editId||Date.now(),seq:editId?(tx.find(x=>x.id===editId)||{}).seq:Date.now(),type,date:$('#fd').value,cat:$('#fc').value,acc:$('#facc').value,amt,note:$('#fn').value.trim(),updatedAt:Date.now()};
   }
   if(editId)tx=tx.map(x=>x.id===editId?t:x);else tx.push(t);
   if(fee>0){
     if(!CAT.out.includes('Biaya admin'))CAT.out.splice(CAT.out.length-1,0,'Biaya admin');
-    tx.push({id:t.id+1,type:'out',date:t.date,cat:'Biaya admin',acc:t.from,amt:fee,note:'Biaya transfer ke '+t.to,updatedAt:Date.now()});
+    tx.push({id:t.id+1,seq:t.id+1,type:'out',date:t.date,cat:'Biaya admin',acc:t.from,amt:fee,note:'Biaya transfer ke '+t.to,updatedAt:Date.now()});
   }
   persist();ym=t.date.slice(0,7);toast(editId?'Perubahan disimpan':(fee>0?'Transaksi & biaya transfer disimpan':'Transaksi disimpan'));resetForm();render()};
 $('#tb').onclick=e=>{
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.up2||b.dataset.down2){
+    const id=Number(b.dataset.up2||b.dataset.down2);
+    const i=visibleOrder.indexOf(id),j=b.dataset.up2?i-1:i+1;
+    if(i<0||j<0||j>=visibleOrder.length)return;
+    const a=tx.find(x=>x.id===id),c=tx.find(x=>x.id===visibleOrder[j]);
+    if(!a||!c)return;
+    const now=Date.now(),sa=a.seq??a.id,sc=c.seq??c.id;
+    a.seq=sc;c.seq=sa;a.updatedAt=now;c.updatedAt=now;
+    persist();render();return;
+  }
   if(b.dataset.d){if(confirm('Hapus transaksi ini?')){const rec=tx.find(x=>x.id==b.dataset.d);if(rec)deletedTx[rec.id]=Date.now();tx=tx.filter(x=>x.id!=b.dataset.d);persist();render();toast('Transaksi dihapus')}}
   if(b.dataset.e){const t=tx.find(x=>x.id==b.dataset.e);if(!t)return;
     editId=t.id;setType(t.type);$('#fd').value=t.date;$('#fa').value=fmtAmt(String(t.amt));$('#fn').value=t.note||'';
@@ -664,7 +684,33 @@ $('#addacc').onclick=()=>{
   const v=$('#newacc').value.trim();if(!v)return;
   if(ACC.some(a=>a.toLowerCase()===v.toLowerCase())){toast('Rekening itu sudah ada');return}
   ACC.push(v);ACCKIND[v]=$('#newaccKind').value;$('#newacc').value='';persist();render();toast('Rekening ditambahkan')};
+function renameAccount(oldName,newName){
+  newName=newName&&newName.trim();
+  if(!newName||newName===oldName)return;
+  if(ACC.some(a=>a.toLowerCase()===newName.toLowerCase())){toast('Nama itu sudah dipakai rekening lain');return}
+  ACC=ACC.map(a=>a===oldName?newName:a);
+  ACCKIND[newName]=ACCKIND[oldName];delete ACCKIND[oldName];
+  const now=Date.now();
+  tx.forEach(t=>{
+    let ch=false;
+    if(t.type==='transfer'){if(t.from===oldName){t.from=newName;ch=true}if(t.to===oldName){t.to=newName;ch=true}}
+    else if(t.acc===oldName){t.acc=newName;ch=true}
+    if(ch)t.updatedAt=now;
+  });
+  GOALS.forEach(g=>{if(g.acc===oldName){g.acc=newName;g.updatedAt=now}});
+  persist();render();toast('Nama rekening diperbarui');
+}
 $('#accMgrList').onclick=e=>{
+  const rn=e.target.closest('button[data-rename]');
+  if(rn){const old=rn.dataset.rename;renameAccount(old,prompt('Nama baru untuk rekening "'+old+'":',old));return}
+  const up=e.target.closest('button[data-up]'),down=e.target.closest('button[data-down]');
+  if(up||down){
+    const name=(up||down).dataset.up||(up||down).dataset.down;
+    const i=ACC.indexOf(name),j=up?i-1:i+1;
+    if(i<0||j<0||j>=ACC.length)return;
+    [ACC[i],ACC[j]]=[ACC[j],ACC[i]];
+    persist();render();return;
+  }
   const kb=e.target.closest('button[data-kind]');
   if(kb){const name=kb.dataset.kind;ACCKIND[name]=kindOf(name)==='cash'?'noncash':'cash';persist();render();return}
   const b=e.target.closest('button[data-delacc]');if(!b)return;
@@ -742,14 +788,14 @@ $('#fileCsv').onchange=e=>{
         if(m.length!==2){skipped++;return}
         const [from,to]=m.map(s=>s.trim());
         [from,to].forEach(a=>{if(!ACC.includes(a)){ACC.push(a);ACCKIND[a]='noncash'}});
-        tx.push({id:id++,type:'transfer',date,from,to,amt,note:catatan||'',updatedAt:Date.now()});added++;
+        tx.push({id:id++,seq:id,type:'transfer',date,from,to,amt,note:catatan||'',updatedAt:Date.now()});added++;
       }else if(jenis==='Pemasukan'||jenis==='Pengeluaran'){
         const t=jenis==='Pemasukan'?'in':'out';
         const m=kategori.match(/^(.*)\s\((.+)\)$/);
         const cat=m?m[1]:kategori,acc=m?m[2]:ACC[0];
         if(!ACC.includes(acc)){ACC.push(acc);ACCKIND[acc]='noncash'}
         if(!CAT[t].includes(cat))CAT[t].splice(CAT[t].length-1,0,cat);
-        tx.push({id:id++,type:t,date,cat,acc,amt,note:catatan||'',updatedAt:Date.now()});added++;
+        tx.push({id:id++,seq:id,type:t,date,cat,acc,amt,note:catatan||'',updatedAt:Date.now()});added++;
       }else skipped++;
     });
     if(!added){toast('Tidak ada baris yang bisa diimpor dari file ini');return}
@@ -765,10 +811,10 @@ $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileR
     if(confirm('Ganti semua data saat ini dengan cadangan ini ('+list.length+' transaksi)?')){
       const now=Date.now(),keepIds=new Set(list.map(x=>String(x.id)));
       tx.forEach(x=>{if(!keepIds.has(String(x.id)))deletedTx[x.id]=now});
-      tx=list.map((x,i)=>({...x,id:x.id||now+i,updatedAt:now}));
+      tx=list.map((x,i)=>({...x,id:x.id||now+i,seq:(x.seq!==undefined?x.seq:(x.id||now+i)),updatedAt:now}));
       if(!Array.isArray(d)){if(d.acc)ACC=d.acc;if(d.acckind)ACCKIND=d.acckind;if(d.cat)CAT=d.cat;
         if(Array.isArray(d.goals)){const gIds=new Set(d.goals.map(g=>String(g.id)));GOALS.forEach(g=>{if(!gIds.has(String(g.id)))deletedGoals[g.id]=now});GOALS=d.goals.map(g=>({...g,updatedAt:now}))}}
-      tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0]});
+      tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0];if(t.seq===undefined)t.seq=t.id});
       persist();resetForm();render();toast('Data dipulihkan')}
   }catch(_){toast('File cadangan tidak valid')}};
   r.readAsText(f);e.target.value=''};

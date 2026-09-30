@@ -5,7 +5,7 @@
   "start_url": "./jurnal-keuangan.html",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#eaf0ee",
   "theme_color": "#12302e",
   "icons": [
