@@ -57,7 +57,10 @@ button,select,input{font:inherit;color:inherit}
 .low{grid-template-columns:330px 1fr;align-items:start}
 @media(max-width:900px){.stats{grid-template-columns:1fr 1fr}.mid,.low{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0;box-shadow:0 1px 2px rgba(0,0,0,.04),0 6px 16px -10px rgba(0,0,0,.12)}
-.hero{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+.hero{background:linear-gradient(135deg,var(--acc),color-mix(in srgb,var(--acc) 72%,#0b4f46));color:var(--accfg);border-color:var(--acc)}
+.page{animation:pgin .18s ease}
+@keyframes pgin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.page{animation:none}}
 .hero .lb{color:inherit;opacity:.75}
 .lb{font-size:13px;color:var(--mut)}
 .val{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;word-break:break-word}
@@ -123,6 +126,15 @@ details[open] summary:before{content:"▾ "}
 .addrow{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .addrow input{flex:2;min-width:140px}.addrow select{flex:1;min-width:120px}
 .linkout{display:inline-block;margin-top:12px;text-decoration:none}
+.lockscreen{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.lockscreen h2{margin:0;font-size:18px}
+.pindots{display:flex;gap:14px}
+.pindots span{width:14px;height:14px;border-radius:50%;border:2px solid var(--mut);transition:background .1s}
+.pindots span.on{background:var(--acc);border-color:var(--acc)}
+.pinpad{display:grid;grid-template-columns:repeat(3,68px);gap:16px;margin-top:6px}
+.pinpad button{width:68px;height:68px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:23px;font-weight:600;color:var(--ink);cursor:pointer}
+.pinpad button:active{background:var(--soft)}
+.pinpad button:disabled{visibility:hidden}
 dialog{border:1px solid var(--line);border-radius:14px;padding:18px;max-width:460px;width:92vw;background:var(--card);color:var(--ink)}
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .tuto{margin:10px 0;padding-left:20px;font-size:13px;color:var(--mut)}
@@ -139,16 +151,40 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 </style>
 </head>
 <body>
+<div class="lockscreen" id="lockScreen" hidden>
+  <div style="font-size:38px">🔒</div>
+  <h2>Masukkan PIN</h2>
+  <div class="pindots" id="pinDots"></div>
+  <p class="sub" id="pinError" style="color:var(--out);min-height:18px"></p>
+  <div class="pinpad" id="pinPad">
+    <button data-k="1" type="button">1</button><button data-k="2" type="button">2</button><button data-k="3" type="button">3</button>
+    <button data-k="4" type="button">4</button><button data-k="5" type="button">5</button><button data-k="6" type="button">6</button>
+    <button data-k="7" type="button">7</button><button data-k="8" type="button">8</button><button data-k="9" type="button">9</button>
+    <button data-k="bio" id="pinBio" type="button" hidden>🫆</button><button data-k="0" type="button">0</button><button data-k="del" id="pinDel" type="button">⌫</button>
+  </div>
+</div>
 <div class="wrap">
 <div class="topbar">
   <h1>💰 Jurnal Keuangan</h1>
   <div class="tools2">
     <span class="syncbadge" id="syncBadge" role="button" tabindex="0" title="Ketuk untuk coba sambung ulang">Memuat…</span>
+    <button class="themebtn" id="lockBtn" type="button" aria-label="Keamanan aplikasi">🔒</button>
     <button class="themebtn" id="gearBtn" type="button" aria-label="Pengaturan server">⚙️</button>
     <button class="themebtn" id="themeBtn" type="button" aria-label="Ganti tema">🌙</button>
   </div>
 </div>
 <p class="note" id="localNote" hidden>Belum tersambung ke server. Ketuk ⚙️ untuk memasukkan alamat server, supaya data tersinkron ke semua perangkat.</p>
+
+<dialog id="secDlg">
+  <h2 style="margin-bottom:4px">Keamanan aplikasi</h2>
+  <p class="note" id="secStatus">Belum ada kunci diatur.</p>
+  <label for="newPin1">PIN baru (4–6 angka)</label><input id="newPin1" inputmode="numeric" maxlength="6" type="password" placeholder="••••">
+  <label for="newPin2">Ulangi PIN</label><input id="newPin2" inputmode="numeric" maxlength="6" type="password" placeholder="••••">
+  <div class="row"><button class="btn pri" id="savePin" type="button">Simpan PIN</button></div>
+  <div class="row"><button class="btn" id="bioSetup" type="button">Aktifkan sidik jari / Face ID</button></div>
+  <p class="note">Kunci ini hanya tersimpan di perangkat ini (tidak disinkronkan), jadi perlu diatur ulang di tiap perangkat. Sidik jari/Face ID memerlukan PIN sudah aktif, dan memakai sensor bawaan HP/laptop Anda.</p>
+  <div class="row"><button class="btn" id="removePin" type="button">Matikan kunci</button><button class="btn" id="secClose" type="button">Tutup</button></div>
+</dialog>
 
 <dialog id="setupDlg">
   <h2 style="margin-bottom:4px">Sambungkan ke server</h2>
@@ -302,9 +338,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
-<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v6 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v7 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
 <dialog id="aboutDlg">
-  <h2 style="margin-bottom:10px">Jurnal Keuangan · v6</h2>
+  <h2 style="margin-bottom:10px">Jurnal Keuangan · v7</h2>
   <div id="aboutBody" class="tuto" style="margin:0"></div>
   <div class="row"><button class="btn pri" id="aboutClose" type="button">Tutup</button></div>
 </dialog>
@@ -474,6 +510,83 @@ $('#copyGas').onclick=async()=>{
   const code="const SHEET_NAME = 'JurnalData';\nconst BACKUP_SHEET = 'Cadangan';\nconst CHUNK = 40000;       // di bawah batas 50.000 karakter per sel\nconst KEEP_BACKUPS = 14;   // jumlah cadangan harian yang disimpan\n\nfunction getSheet_() {\n  const ss = SpreadsheetApp.getActiveSpreadsheet();\n  let sh = ss.getSheetByName(SHEET_NAME);\n  if (!sh) {\n    sh = ss.insertSheet(SHEET_NAME);\n    sh.getRange('A1').setNumberFormat('@').setValue('{}');\n  }\n  return sh;\n}\n\nfunction checkKey_(e) {\n  const req = PropertiesService.getScriptProperties().getProperty('SECRET_KEY');\n  const given = (e.parameter && e.parameter.key) || '';\n  return !req || req === given;\n}\n\nfunction readAll_(sh) {\n  const last = sh.getLastRow();\n  if (last < 1) return '{}';\n  const vals = sh.getRange(1, 1, last, 1).getValues();\n  return vals.map(function (r) { return String(r[0]); }).join('') || '{}';\n}\n\nfunction writeAll_(sh, text) {\n  const parts = [];\n  for (let i = 0; i < text.length; i += CHUNK) parts.push([text.substring(i, i + CHUNK)]);\n  if (!parts.length) parts.push(['{}']);\n  const oldLast = sh.getLastRow();\n  // format teks ('@') supaya potongan yang diawali \"=\" tidak dianggap rumus\n  sh.getRange(1, 1, parts.length, 1).setNumberFormat('@').setValues(parts);\n  if (oldLast > parts.length) sh.getRange(parts.length + 1, 1, oldLast - parts.length, 1).clearContent();\n}\n\nfunction snapshot_(prev) {\n  try {\n    if (!prev || prev === '{}') return;\n    const ss = SpreadsheetApp.getActiveSpreadsheet();\n    let bk = ss.getSheetByName(BACKUP_SHEET);\n    if (!bk) {\n      bk = ss.insertSheet(BACKUP_SHEET);\n      bk.getRange(1, 1, 1, 2).setValues([['Waktu (data sebelum perubahan pertama hari itu)', 'Data JSON (dipecah per sel)']]);\n    }\n    const tz = Session.getScriptTimeZone();\n    const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');\n    const last = bk.getLastRow();\n    if (last >= 2 && String(bk.getRange(last, 1).getValue()).indexOf(today) === 0) return; // sudah ada hari ini\n    const row = [Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')];\n    for (let i = 0; i < prev.length; i += CHUNK) row.push(prev.substring(i, i + CHUNK));\n    bk.getRange(last + 1, 1, 1, row.length).setNumberFormat('@').setValues([row]);\n    const total = bk.getLastRow();\n    if (total > KEEP_BACKUPS + 1) bk.deleteRows(2, total - (KEEP_BACKUPS + 1));\n  } catch (err) { /* cadangan gagal tidak boleh menggagalkan penyimpanan utama */ }\n}\n\nfunction doGet(e) {\n  if (!checkKey_(e)) return jsonOut_({ error: 'unauthorized' });\n  const lock = LockService.getScriptLock();\n  if (!lock.tryLock(15000)) return jsonOut_({ error: 'server sibuk, coba lagi' });\n  try {\n    return jsonOut_({ data: readAll_(getSheet_()) });\n  } catch (err) {\n    return jsonOut_({ error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n\nfunction doPost(e) {\n  if (!checkKey_(e)) return jsonOut_({ error: 'unauthorized' });\n  const body = (e.postData && e.postData.contents) || '';\n  try { JSON.parse(body); } catch (err) { return jsonOut_({ error: 'invalid json' }); }\n  const lock = LockService.getScriptLock();\n  if (!lock.tryLock(15000)) return jsonOut_({ error: 'server sibuk, coba lagi' });\n  try {\n    const sh = getSheet_();\n    snapshot_(readAll_(sh));\n    writeAll_(sh, body);\n    return jsonOut_({ status: 'ok' });\n  } catch (err) {\n    return jsonOut_({ error: String(err) });\n  } finally {\n    lock.releaseLock();\n  }\n}\n\nfunction jsonOut_(obj) {\n  return ContentService.createTextOutput(JSON.stringify(obj))\n    .setMimeType(ContentService.MimeType.JSON);\n}\n";
   try{await navigator.clipboard.writeText(code);toast('Kode server disalin — tempel di Apps Script')}
   catch(e){toast('Gagal menyalin otomatis — salin manual dari sumber halaman jika perlu')}
+};
+
+/* ---------- keamanan: PIN & sidik jari/Face ID (lokal per perangkat) ---------- */
+async function sha256(txt){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('jk-salt-v1:'+txt));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+const pinHash=()=>{try{return localStorage.getItem('jk_pin_hash')}catch(e){return null}};
+const pinLen=()=>{try{return Number(localStorage.getItem('jk_pin_len'))||4}catch(e){return 4}};
+const bioId=()=>{try{return localStorage.getItem('jk_webauthn_id')}catch(e){return null}};
+let pinBuf='';
+function updateDots(){$('#pinDots').innerHTML=Array.from({length:pinLen()},(_,i)=>`<span class="${i<pinBuf.length?'on':''}"></span>`).join('')}
+async function checkPin(){
+  const h=await sha256(pinBuf);
+  if(h===pinHash()){$('#lockScreen').hidden=true;pinBuf=''}
+  else{$('#pinError').textContent='PIN salah, coba lagi';pinBuf='';updateDots();setTimeout(()=>{$('#pinError').textContent=''},1500)}
+}
+async function tryBio(){
+  const id=bioId();if(!id||!window.PublicKeyCredential)return;
+  try{
+    const credId=Uint8Array.from(atob(id),c=>c.charCodeAt(0));
+    await navigator.credentials.get({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),allowCredentials:[{id:credId,type:'public-key'}],userVerification:'required',timeout:30000}});
+    $('#lockScreen').hidden=true;
+  }catch(e){/* batal/gagal -> biarkan user pakai PIN */}
+}
+function showLock(){
+  if(!pinHash())return;
+  pinBuf='';updateDots();$('#pinError').textContent='';
+  $('#pinBio').hidden=!bioId();
+  $('#lockScreen').hidden=false;
+  if(bioId())tryBio();
+}
+$('#pinPad').onclick=e=>{
+  const b=e.target.closest('button');if(!b||b.hidden)return;const k=b.dataset.k;
+  if(k==='del'){pinBuf=pinBuf.slice(0,-1);updateDots();return}
+  if(k==='bio'){tryBio();return}
+  if(pinBuf.length<pinLen()){pinBuf+=k;updateDots();if(pinBuf.length===pinLen())checkPin()}
+};
+function renderSecStatus(){
+  const has=pinHash(),bio=bioId();
+  $('#secStatus').textContent=has?`Kunci aktif — PIN ${pinLen()} digit${bio?' + sidik jari/Face ID':''}.`:'Belum ada kunci diatur. Aplikasi terbuka langsung tanpa PIN.';
+  $('#removePin').hidden=!has;
+}
+$('#lockBtn').onclick=()=>{renderSecStatus();$('#secDlg').showModal()};
+$('#secClose').onclick=()=>$('#secDlg').close();
+$('#savePin').onclick=async()=>{
+  const p1=$('#newPin1').value.trim(),p2=$('#newPin2').value.trim();
+  if(!/^\d{4,6}$/.test(p1)){toast('PIN harus 4-6 angka');return}
+  if(p1!==p2){toast('PIN tidak sama, coba lagi');return}
+  const h=await sha256(p1);
+  try{localStorage.setItem('jk_pin_hash',h);localStorage.setItem('jk_pin_len',String(p1.length))}catch(e){}
+  $('#newPin1').value='';$('#newPin2').value='';
+  toast('PIN diaktifkan');renderSecStatus();
+};
+$('#bioSetup').onclick=async()=>{
+  if(!pinHash()){toast('Atur PIN dulu sebelum mengaktifkan sidik jari');return}
+  if(!window.PublicKeyCredential){toast('Perangkat/browser ini tidak mendukung sidik jari/Face ID');return}
+  try{
+    const avail=await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    if(!avail){toast('Sidik jari/Face ID tidak tersedia di perangkat ini');return}
+    const cred=await navigator.credentials.create({publicKey:{
+      challenge:crypto.getRandomValues(new Uint8Array(32)),
+      rp:{name:'Jurnal Keuangan'},
+      user:{id:crypto.getRandomValues(new Uint8Array(16)),name:'pengguna',displayName:'Pengguna'},
+      pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required'},
+      timeout:60000
+    }});
+    const id=btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+    try{localStorage.setItem('jk_webauthn_id',id)}catch(e){}
+    toast('Sidik jari/Face ID diaktifkan');renderSecStatus();
+  }catch(e){toast('Gagal mengaktifkan: '+(e&&e.message?e.message:'dibatalkan'))}
+};
+$('#removePin').onclick=()=>{
+  if(!confirm('Matikan kunci PIN/sidik jari aplikasi ini?'))return;
+  try{localStorage.removeItem('jk_pin_hash');localStorage.removeItem('jk_pin_len');localStorage.removeItem('jk_webauthn_id')}catch(e){}
+  toast('Kunci aplikasi dimatikan');renderSecStatus();
 };
 
 /* ---------- theme ---------- */
@@ -891,6 +1004,7 @@ $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileR
 $('#del').onclick=()=>{if(tx.length&&confirm('Hapus SEMUA transaksi? Pastikan sudah dicadangkan.')){const now=Date.now();tx.forEach(x=>{deletedTx[x.id]=now});tx=[];persist();render();toast('Semua data dihapus')}};
 
 /* ---------- boot ---------- */
+showLock();
 applyTheme();
 resetForm();
 showPage(location.hash.slice(1));
@@ -899,6 +1013,7 @@ $('#aboutBtn').onclick=()=>{
   $('#aboutBody').innerHTML=`<p class="sub">Jurnal keuangan pribadi — transaksi, rekening, tabungan &amp; investasi, tersinkron lewat server Anda sendiri.</p>
   <p class="sub" style="margin-top:10px"><b>Riwayat perubahan singkat:</b></p>
   <ol style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--mut)">
+    <li>v7 — kunci aplikasi (PIN/sidik jari-Face ID), tampilan lebih segar</li>
     <li>v6 — navigasi dock bawah, tata letak saldo rekening &amp; dashboard dirapikan</li>
     <li>v5 — ganti nama &amp; geser urutan kategori</li>
     <li>v4 — rotasi layar HP, ganti nama &amp; geser urutan rekening/transaksi</li>
