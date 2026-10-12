@@ -162,6 +162,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button data-k="7" type="button">7</button><button data-k="8" type="button">8</button><button data-k="9" type="button">9</button>
     <button data-k="bio" id="pinBio" type="button" hidden>🫆</button><button data-k="0" type="button">0</button><button data-k="del" id="pinDel" type="button">⌫</button>
   </div>
+  <button class="linklike" id="pinForgot" type="button" style="margin-top:4px">Lupa PIN?</button>
 </div>
 <div class="wrap">
 <div class="topbar">
@@ -178,8 +179,8 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <dialog id="secDlg">
   <h2 style="margin-bottom:4px">Keamanan aplikasi</h2>
   <p class="note" id="secStatus">Belum ada kunci diatur.</p>
-  <label for="newPin1">PIN baru (4–6 angka)</label><input id="newPin1" inputmode="numeric" maxlength="6" type="password" placeholder="••••">
-  <label for="newPin2">Ulangi PIN</label><input id="newPin2" inputmode="numeric" maxlength="6" type="password" placeholder="••••">
+  <label for="newPin1">PIN baru (4–6 angka)</label><input id="newPin1" inputmode="numeric" maxlength="6" type="password" placeholder="••••" autocomplete="off" data-lpignore="true" data-1p-ignore>
+  <label for="newPin2">Ulangi PIN</label><input id="newPin2" inputmode="numeric" maxlength="6" type="password" placeholder="••••" autocomplete="off" data-lpignore="true" data-1p-ignore>
   <div class="row"><button class="btn pri" id="savePin" type="button">Simpan PIN</button></div>
   <div class="row"><button class="btn" id="bioSetup" type="button">Aktifkan sidik jari / Face ID</button></div>
   <p class="note">Kunci ini hanya tersimpan di perangkat ini (tidak disinkronkan), jadi perlu diatur ulang di tiap perangkat. Sidik jari/Face ID memerlukan PIN sudah aktif, dan memakai sensor bawaan HP/laptop Anda.</p>
@@ -338,9 +339,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
-<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v7 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v8 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
 <dialog id="aboutDlg">
-  <h2 style="margin-bottom:10px">Jurnal Keuangan · v7</h2>
+  <h2 style="margin-bottom:10px">Jurnal Keuangan · v8</h2>
   <div id="aboutBody" class="tuto" style="margin:0"></div>
   <div class="row"><button class="btn pri" id="aboutClose" type="button">Tutup</button></div>
 </dialog>
@@ -542,6 +543,18 @@ function showLock(){
   $('#lockScreen').hidden=false;
   if(bioId())tryBio();
 }
+$('#pinForgot').onclick=()=>{
+  if(!apiKey){toast('Server belum pernah diatur di perangkat ini. Buka Setelan HP → Apps → "Jurnal" (atau Chrome) → Storage → Clear storage untuk membuka kunci.');return}
+  const input=prompt('Lupa PIN? Masukkan kunci rahasia server Anda (yang dipakai di ⚙️) untuk membuka kunci:');
+  if(input===null)return;
+  if(input.trim()===apiKey){
+    try{localStorage.removeItem('jk_pin_hash');localStorage.removeItem('jk_pin_len');localStorage.removeItem('jk_webauthn_id')}catch(e){}
+    $('#lockScreen').hidden=true;pinBuf='';
+    toast('Kunci PIN dimatikan. Atur PIN baru lewat 🔒 kalau mau mengaktifkan lagi.');
+  }else{
+    toast('Kunci rahasia tidak cocok.');
+  }
+};
 $('#pinPad').onclick=e=>{
   const b=e.target.closest('button');if(!b||b.hidden)return;const k=b.dataset.k;
   if(k==='del'){pinBuf=pinBuf.slice(0,-1);updateDots();return}
@@ -559,6 +572,7 @@ $('#savePin').onclick=async()=>{
   const p1=$('#newPin1').value.trim(),p2=$('#newPin2').value.trim();
   if(!/^\d{4,6}$/.test(p1)){toast('PIN harus 4-6 angka');return}
   if(p1!==p2){toast('PIN tidak sama, coba lagi');return}
+  if(!confirm(`Aktifkan kunci PIN "${p1}" sekarang? Anda harus memasukkan PIN ini setiap kali membuka aplikasi di perangkat ini. Pastikan sudah diingat.`))return;
   const h=await sha256(p1);
   try{localStorage.setItem('jk_pin_hash',h);localStorage.setItem('jk_pin_len',String(p1.length))}catch(e){}
   $('#newPin1').value='';$('#newPin2').value='';
@@ -1013,6 +1027,7 @@ $('#aboutBtn').onclick=()=>{
   $('#aboutBody').innerHTML=`<p class="sub">Jurnal keuangan pribadi — transaksi, rekening, tabungan &amp; investasi, tersinkron lewat server Anda sendiri.</p>
   <p class="sub" style="margin-top:10px"><b>Riwayat perubahan singkat:</b></p>
   <ol style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--mut)">
+    <li>v8 — perbaikan kunci PIN: cegah ter-aktif tanpa sengaja, tambah jalur "Lupa PIN?"</li>
     <li>v7 — kunci aplikasi (PIN/sidik jari-Face ID), tampilan lebih segar</li>
     <li>v6 — navigasi dock bawah, tata letak saldo rekening &amp; dashboard dirapikan</li>
     <li>v5 — ganti nama &amp; geser urutan kategori</li>
