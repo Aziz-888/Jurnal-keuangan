@@ -163,6 +163,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <button data-k="bio" id="pinBio" type="button" hidden>🫆</button><button data-k="0" type="button">0</button><button data-k="del" id="pinDel" type="button">⌫</button>
   </div>
   <button class="linklike" id="pinForgot" type="button" style="margin-top:4px">Lupa PIN?</button>
+  <p class="sub" style="max-width:280px;text-align:center;margin-top:10px">Masih terkunci? Tambahkan <code style="background:var(--soft);padding:1px 5px;border-radius:4px">?resetlock=1</code> di akhir alamat situs ini lalu buka — kunci akan langsung terhapus.</p>
 </div>
 <div class="wrap">
 <div class="topbar">
@@ -354,9 +355,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
-<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v9 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v10 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
 <dialog id="aboutDlg">
-  <h2 style="margin-bottom:10px">Jurnal Keuangan · v9</h2>
+  <h2 style="margin-bottom:10px">Jurnal Keuangan · v10</h2>
   <div id="aboutBody" class="tuto" style="margin:0"></div>
   <div class="row"><button class="btn pri" id="aboutClose" type="button">Tutup</button></div>
 </dialog>
@@ -364,6 +365,17 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <div id="toast" role="status"></div>
 
 <script>
+/* JALAN KELUAR DARURAT: buka alamat situs ini + "?resetlock=1" di belakangnya
+   (contoh: https://nama-anda.github.io/repo/jurnal-keuangan.html?resetlock=1)
+   untuk MEMAKSA hapus status kunci PIN/sidik jari, SETIAP KALI dipanggil — tidak cuma
+   sekali, dan tidak bergantung pada logika saklar pengaman di bawah ini sama sekali. */
+try{
+  if(location.search.includes('resetlock')){
+    localStorage.removeItem('jk_pin_hash');
+    localStorage.removeItem('jk_pin_len');
+    localStorage.removeItem('jk_webauthn_id');
+  }
+}catch(e){}
 /* SAKLAR PENGAMAN v9: hapus paksa status kunci PIN/sidik jari yang mungkin tersangkut,
    satu kali per perangkat, apa pun sebabnya. Harus jadi baris PERTAMA yang dijalankan,
    sebelum kode apa pun lain, supaya layar kunci TIDAK PERNAH sempat tampil dari status lama. */
@@ -1069,6 +1081,7 @@ $('#aboutBtn').onclick=()=>{
   $('#aboutBody').innerHTML=`<p class="sub">Jurnal keuangan pribadi — transaksi, rekening, tabungan &amp; investasi, tersinkron lewat server Anda sendiri.</p>
   <p class="sub" style="margin-top:10px"><b>Riwayat perubahan singkat:</b></p>
   <ol style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--mut)">
+    <li>v10 — jalan keluar darurat <code>?resetlock=1</code> di alamat situs, selalu berfungsi kapan pun dibutuhkan</li>
     <li>v9 — saklar pengaman: paksa buka kunci PIN yg tersangkut di semua perangkat; kunci PIN kini saklar ON/OFF eksplisit</li>
     <li>v8 — perbaikan kunci PIN: cegah ter-aktif tanpa sengaja, tambah jalur "Lupa PIN?"</li>
     <li>v7 — kunci aplikasi (PIN/sidik jari-Face ID), tampilan lebih segar</li>
