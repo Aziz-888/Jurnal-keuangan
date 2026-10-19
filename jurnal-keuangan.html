@@ -305,9 +305,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </section>
 </div>
 
-<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v11 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
+<p class="note" style="text-align:center;margin-top:18px">Jurnal Keuangan · v13 · <button class="linklike" id="aboutBtn" type="button">Tentang</button></p>
 <dialog id="aboutDlg">
-  <h2 style="margin-bottom:10px">Jurnal Keuangan · v11</h2>
+  <h2 style="margin-bottom:10px">Jurnal Keuangan · v13</h2>
   <div id="aboutBody" class="tuto" style="margin:0"></div>
   <div class="row"><button class="btn pri" id="aboutClose" type="button">Tutup</button></div>
 </dialog>
@@ -334,7 +334,7 @@ const today=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOff
 const monthKey=(y,m)=>{const d=new Date(y,m,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
 const COL=['#0f7a6b','#e3a72f','#c2483d','#3b6fb6','#8a5cc2','#e07b39','#4aa3a0','#8c9a3a'];
 
-let ACC=['Tunai','Bank'],ACCKIND={Tunai:'cash',Bank:'noncash'};
+let ACC=['Tunai','Bank'],ACCKIND={Tunai:'cash',Bank:'noncash'},ACCINCLUDE={};
 let CAT={in:['Gaji','Bonus','Usaha online','Lainnya'],out:['Makanan','Transportasi','Tagihan','Belanja','Keluarga','Investasi','Hiburan','Lainnya']};
 let tx=[],GOALS=[],deletedTx={},deletedGoals={},metaAt=0,lastMetaSig='',ym=today().slice(0,7),type='out',editId=null,catPageType='out';
 let apiUrl=null,apiKey=null,synced=false,writing=false,queued=false,pollTimer=null;
@@ -344,6 +344,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clea
 const sum=(a,t)=>a.filter(x=>x.type===t).reduce((s,x)=>s+x.amt,0);
 function opts(sel,list,selected){const cur=selected!==undefined?selected:sel.value;sel.innerHTML=list.map(c=>`<option${c===cur?' selected':''}>${esc(c)}</option>`).join('')}
 const kindOf=name=>ACCKIND[name]||(/tunai|cash/i.test(name)?'cash':'noncash');
+const inTotal=name=>ACCINCLUDE[name]!==false;
 
 /* ---------- data & sync (Google Apps Script backend) ---------- */
 // Prinsip keamanan data:
@@ -352,12 +353,12 @@ const kindOf=name=>ACCKIND[name]||(/tunai|cash/i.test(name)?'cash':'noncash');
 //  3) Jika gagal membaca server, aplikasi TIDAK menulis apa pun ke server.
 function stable(v){if(Array.isArray(v))return v.map(stable);if(v&&typeof v==='object'){const o={};Object.keys(v).sort().forEach(k=>{o[k]=stable(v[k])});return o}return v}
 const sig=s=>JSON.stringify(stable(s));
-const metaSig=()=>JSON.stringify(stable([ACC,ACCKIND,CAT]));
+const metaSig=()=>JSON.stringify(stable([ACC,ACCKIND,CAT,ACCINCLUDE]));
 const cl=x=>JSON.parse(JSON.stringify(x));
 function normDel(d){if(Array.isArray(d)){const o={};d.forEach(i=>{o[i]=1});return o}return(d&&typeof d==='object')?d:{}}
-function buildState(){return{acc:ACC,acckind:ACCKIND,cat:CAT,tx,goals:GOALS,deletedTx,deletedGoals,metaAt}}
+function buildState(){return{acc:ACC,acckind:ACCKIND,acctotal:ACCINCLUDE,cat:CAT,tx,goals:GOALS,deletedTx,deletedGoals,metaAt}}
 function applyState(d){
-  ACC=d.acc||ACC;ACCKIND=d.acckind||ACCKIND;CAT=d.cat||CAT;tx=d.tx||tx;GOALS=d.goals||GOALS;
+  ACC=d.acc||ACC;ACCKIND=d.acckind||ACCKIND;ACCINCLUDE=d.acctotal||ACCINCLUDE;CAT=d.cat||CAT;tx=d.tx||tx;GOALS=d.goals||GOALS;
   deletedTx=normDel(d.deletedTx);deletedGoals=normDel(d.deletedGoals);metaAt=d.metaAt||0;
   tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0];if(t.seq===undefined)t.seq=t.id});
   GOALS.forEach(g=>{if(g.order===undefined)g.order=g.id});
@@ -380,15 +381,16 @@ function mergeState(local,remote){
     return[...m.values()].filter(x=>{const t=del[x.id];return t===undefined||(x.updatedAt||0)>t}).sort((a,b)=>a.id-b.id);
   };
   const la=local.metaAt||0,ra=remote.metaAt||0;
-  let acc,acckind,cat;
-  if(la>ra){acc=cl(local.acc||[]);acckind=cl(local.acckind||{});cat=cl(local.cat||{})}
-  else if(ra>la){acc=cl(remote.acc||[]);acckind=cl(remote.acckind||{});cat=cl(remote.cat||{})}
+  let acc,acckind,acctotal,cat;
+  if(la>ra){acc=cl(local.acc||[]);acckind=cl(local.acckind||{});acctotal=cl(local.acctotal||{});cat=cl(local.cat||{})}
+  else if(ra>la){acc=cl(remote.acc||[]);acckind=cl(remote.acckind||{});acctotal=cl(remote.acctotal||{});cat=cl(remote.cat||{})}
   else{
     acc=unionList(remote.acc,local.acc);acckind={...(remote.acckind||{}),...(local.acckind||{})};
+    acctotal={...(remote.acctotal||{}),...(local.acctotal||{})};
     cat={in:unionList(remote.cat&&remote.cat.in,local.cat&&local.cat.in),out:unionList(remote.cat&&remote.cat.out,local.cat&&local.cat.out)};
   }
   cat.in=cat.in||[];cat.out=cat.out||[];
-  const out={acc,acckind,cat,tx:pick(local.tx,remote.tx,dTx),goals:pick(local.goals,remote.goals,dG),deletedTx:dTx,deletedGoals:dG,metaAt:Math.max(la,ra)};
+  const out={acc,acckind,acctotal,cat,tx:pick(local.tx,remote.tx,dTx),goals:pick(local.goals,remote.goals,dG),deletedTx:dTx,deletedGoals:dG,metaAt:Math.max(la,ra)};
   ensureRefs(out);
   return out;
 }
@@ -533,16 +535,19 @@ function accBalance(name){
 
 /* ---------- renderers ---------- */
 function renderAcc(){
-  const cash=ACC.filter(a=>kindOf(a)==='cash').reduce((s,a)=>s+accBalance(a),0);
-  const non=ACC.filter(a=>kindOf(a)==='noncash').reduce((s,a)=>s+accBalance(a),0);
-  const summary=`<span>Tunai: <b>${rp(cash)}</b></span><span>Non-tunai: <b>${rp(non)}</b></span>`;
+  const cash=ACC.filter(a=>kindOf(a)==='cash'&&inTotal(a)).reduce((s,a)=>s+accBalance(a),0);
+  const non=ACC.filter(a=>kindOf(a)==='noncash'&&inTotal(a)).reduce((s,a)=>s+accBalance(a),0);
+  const excluded=ACC.filter(a=>!inTotal(a));
+  const summary=`<span>Tunai: <b>${rp(cash)}</b></span><span>Non-tunai: <b>${rp(non)}</b></span><span>Total semua rekening: <b style="color:var(--ink)">${rp(cash+non)}</b></span>`
+    +(excluded.length?`<div class="sub" style="margin-top:4px">Di luar total: ${excluded.map(esc).join(', ')}</div>`:'');
   $('#accSummary').innerHTML=summary;$('#accSummary2').innerHTML=summary;
-  $('#accList').innerHTML=ACC.map(a=>{const b=accBalance(a),ic=kindOf(a)==='cash'?'💵':'🏦';return `<div class="chip"><span class="nm"><i>${ic}</i>${esc(a)}</span><b class="${b<0?'neg':''}">${rp(b)}</b></div>`}).join('');
+  $('#accList').innerHTML=ACC.map(a=>{const b=accBalance(a),ic=kindOf(a)==='cash'?'💵':'🏦';return `<div class="chip"><span class="nm"><i>${ic}</i>${esc(a)}${inTotal(a)?'':' <span class="sub">(di luar total)</span>'}</span><b class="${b<0?'neg':''}">${rp(b)}</b></div>`}).join('');
   $('#accMgrList').innerHTML=ACC.map((a,i)=>`<div class="catrow"><span>${esc(a)} <span class="sub">(${kindOf(a)==='cash'?'Tunai':'Non-tunai'})</span></span><span>
     <button class="btn sm" data-up="${esc(a)}" ${i===0?'disabled':''} aria-label="Naikkan urutan ${esc(a)}">▲</button>
     <button class="btn sm" data-down="${esc(a)}" ${i===ACC.length-1?'disabled':''} aria-label="Turunkan urutan ${esc(a)}">▼</button>
     <button class="btn sm" data-rename="${esc(a)}">Ganti nama</button>
-    <button class="btn sm" data-kind="${esc(a)}">Ubah jenis</button>${ACC.length>1?`<button class="btn sm" data-delacc="${esc(a)}">Hapus</button>`:''}</span></div>`).join('');
+    <button class="btn sm" data-kind="${esc(a)}">Ubah jenis</button>${ACC.length>1?`<button class="btn sm" data-delacc="${esc(a)}">Hapus</button>`:''}</span></div>
+    <div class="catrow" style="border-top:none;padding-top:0"><label style="margin:0;font-size:13px;color:var(--mut);display:flex;align-items:center;gap:6px"><input type="checkbox" data-total="${esc(a)}" ${inTotal(a)?'checked':''} style="width:auto">Hitung ke Saldo Total</label></div>`).join('');
   opts($('#facc'),ACC);opts($('#ffrom'),ACC);opts($('#fto'),ACC.length>1?ACC.filter(a=>a!==$('#ffrom').value):ACC);
   const fAcc=$('#fAcc'),cur=fAcc.value;
   fAcc.innerHTML='<option value="">Semua rekening</option>'+ACC.map(a=>`<option${a===cur?' selected':''}>${esc(a)}</option>`).join('');
@@ -594,10 +599,11 @@ function renderCatPage(){
   }).join('');
 }
 function stats(mt){
-  const all=ACC.reduce((s,a)=>s+accBalance(a),0),inc=sum(mt,'in'),out=sum(mt,'out'),net=inc-out;
+  const all=ACC.filter(inTotal).reduce((s,a)=>s+accBalance(a),0),inc=sum(mt,'in'),out=sum(mt,'out'),net=inc-out;
   const rate=inc>0?Math.round(net/inc*100):null;
+  const exCount=ACC.length-ACC.filter(inTotal).length;
   $('#stats').innerHTML=
-   `<div class="card hero"><div class="lb">Saldo total</div><div class="val">${rp(all)}</div><div class="lb">Gabungan semua rekening</div></div>`+
+   `<div class="card hero"><div class="lb">Saldo total</div><div class="val">${rp(all)}</div><div class="lb">${exCount?`Gabungan rekening terpilih (${exCount} rekening dikecualikan)`:'Gabungan semua rekening'}</div></div>`+
    `<div class="card"><div class="lb">Pemasukan</div><div class="val pos">${rp(inc)}</div><div class="sub">${mt.filter(t=>t.type==='in').length} transaksi</div></div>`+
    `<div class="card"><div class="lb">Pengeluaran</div><div class="val neg">${rp(out)}</div><div class="sub">${mt.filter(t=>t.type==='out').length} transaksi</div></div>`+
    `<div class="card"><div class="lb">Sisa bulan ini</div><div class="val ${net<0?'neg':''}">${rp(net)}</div><div class="sub">${rate===null?'Belum ada pemasukan':(rate>=0?'Ditabung ':'Defisit ')+Math.abs(rate)+'% dari pemasukan'}</div></div>`;
@@ -738,6 +744,7 @@ function renameAccount(oldName,newName){
   if(ACC.some(a=>a.toLowerCase()===newName.toLowerCase())){toast('Nama itu sudah dipakai rekening lain');return}
   ACC=ACC.map(a=>a===oldName?newName:a);
   ACCKIND[newName]=ACCKIND[oldName];delete ACCKIND[oldName];
+  if(oldName in ACCINCLUDE){ACCINCLUDE[newName]=ACCINCLUDE[oldName];delete ACCINCLUDE[oldName]}
   const now=Date.now();
   tx.forEach(t=>{
     let ch=false;
@@ -748,6 +755,11 @@ function renameAccount(oldName,newName){
   GOALS.forEach(g=>{if(g.acc===oldName){g.acc=newName;g.updatedAt=now}});
   persist();render();toast('Nama rekening diperbarui');
 }
+$('#accMgrList').addEventListener('change',e=>{
+  const cb=e.target.closest('input[data-total]');if(!cb)return;
+  ACCINCLUDE[cb.dataset.total]=cb.checked;
+  persist();render();
+});
 $('#accMgrList').onclick=e=>{
   const rn=e.target.closest('button[data-rename]');
   if(rn){const old=rn.dataset.rename;renameAccount(old,prompt('Nama baru untuk rekening "'+old+'":',old));return}
@@ -767,7 +779,7 @@ $('#accMgrList').onclick=e=>{
   const used=tx.some(t=>t.type==='transfer'?(t.from===name||t.to===name):t.acc===name);
   if(used){toast('Rekening ini masih dipakai di transaksi. Ubah atau hapus transaksi itu dulu.');return}
   if(GOALS.some(g=>g.acc===name)){toast('Rekening ini masih dipakai sebagai target tabungan/investasi. Hapus targetnya dulu.');return}
-  if(confirm(`Hapus rekening "${name}"?`)){ACC=ACC.filter(a=>a!==name);delete ACCKIND[name];persist();render();toast('Rekening dihapus')}};
+  if(confirm(`Hapus rekening "${name}"?`)){ACC=ACC.filter(a=>a!==name);delete ACCKIND[name];delete ACCINCLUDE[name];persist();render();toast('Rekening dihapus')}};
 
 /* ---------- events: goals page ---------- */
 $('#gTgt').oninput=e=>e.target.value=fmtAmt(e.target.value);
@@ -895,7 +907,7 @@ $('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileR
       const now=Date.now(),keepIds=new Set(list.map(x=>String(x.id)));
       tx.forEach(x=>{if(!keepIds.has(String(x.id)))deletedTx[x.id]=now});
       tx=list.map((x,i)=>({...x,id:x.id||now+i,seq:(x.seq!==undefined?x.seq:(x.id||now+i)),updatedAt:now}));
-      if(!Array.isArray(d)){if(d.acc)ACC=d.acc;if(d.acckind)ACCKIND=d.acckind;if(d.cat)CAT=d.cat;
+      if(!Array.isArray(d)){if(d.acc)ACC=d.acc;if(d.acckind)ACCKIND=d.acckind;if(d.acctotal)ACCINCLUDE=d.acctotal;if(d.cat)CAT=d.cat;
         if(Array.isArray(d.goals)){const gIds=new Set(d.goals.map(g=>String(g.id)));GOALS.forEach(g=>{if(!gIds.has(String(g.id)))deletedGoals[g.id]=now});GOALS=d.goals.map((g,i)=>({...g,order:(g.order!==undefined?g.order:(g.id||now+i)),updatedAt:now}))}}
       tx.forEach(t=>{if(t.type!=='transfer'&&!t.acc)t.acc=ACC[0];if(t.seq===undefined)t.seq=t.id});
   GOALS.forEach(g=>{if(g.order===undefined)g.order=g.id});
@@ -913,6 +925,8 @@ $('#aboutBtn').onclick=()=>{
   $('#aboutBody').innerHTML=`<p class="sub">Jurnal keuangan pribadi — transaksi, rekening, tabungan &amp; investasi, tersinkron lewat server Anda sendiri.</p>
   <p class="sub" style="margin-top:10px"><b>Riwayat perubahan singkat:</b></p>
   <ol style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--mut)">
+    <li>v13 — tombol "Hitung ke Saldo Total" per rekening, bisa kecualikan rekening tertentu dari saldo total</li>
+    <li>v12 — tambah "Total semua rekening" di halaman Rekening (tidak perlu bolak-balik ke Dashboard)</li>
     <li>v11 — fitur kunci PIN/sidik jari DICABUT TOTAL (bukan cuma dimatikan), menghilangkan risiko terkunci</li>
     <li>v10 — jalan keluar darurat <code>?resetlock=1</code> di alamat situs, selalu berfungsi kapan pun dibutuhkan</li>
     <li>v9 — saklar pengaman: paksa buka kunci PIN yg tersangkut di semua perangkat; kunci PIN kini saklar ON/OFF eksplisit</li>
